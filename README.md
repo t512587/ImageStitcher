@@ -4,6 +4,9 @@ Create a single, wide “whole shelf” image from two top‑down cameras. The c
 
 This repository is a streamlined and optimized fork tailored for shelf imaging with similar camera poses.
 
+![image](https://github.com/user-attachments/assets/f2ff20b1-54c3-4182-a8be-4c0301986d42)
+![image](https://github.com/user-attachments/assets/269bc127-dbc9-4efd-82f2-ac661c74858b)
+![image](https://github.com/user-attachments/assets/00962c0e-3e86-4b9b-9bc6-58c986186327)
 
 ## Features
 - **SIFT feature detection/description** (OpenCV) and **BFMatcher + Lowe’s ratio** filtering
