@@ -12,7 +12,7 @@ class Stitcher:
     def __init__(self):
         pass
 
-    def stitch(self, imgs, blending_mode="linearBlending", ratio=0.75):
+    def stitch(self, imgs, blending_mode="linearBlending", ratio=0.75, view_mode="center"):
         '''
             The main method to stitch image
         '''
@@ -41,7 +41,7 @@ class Stitcher:
 
         # Step4 - Warp image to create panoramic image
         print("Step4 - Warp image to create panoramic image...")
-        warp_img = self.warp([img_left, img_right], HomoMat, blending_mode)
+        warp_img = self.warp([img_left, img_right], HomoMat, blending_mode, view_mode)
 
         return warp_img
 
@@ -127,7 +127,7 @@ class Stitcher:
         return H
 
 
-    def warp(self, imgs, HomoMat, blending_mode):
+    def warp(self, imgs, HomoMat, blending_mode, view_mode="center"):
         '''
            Warp image to create panoramic image
            There are three different blending method - noBlending、linearBlending、linearBlendingWithConstant
@@ -136,34 +136,148 @@ class Stitcher:
         hl, wl = img_left.shape[:2]
         hr, wr = img_right.shape[:2]
 
-        # 建立拼接圖的大小
+        if view_mode == "center":
+            return self._warp_center_view(img_left, img_right, HomoMat, blending_mode)
+        else:
+            return self._warp_right_to_left(img_left, img_right, HomoMat, blending_mode)
+
+    def _warp_right_to_left(self, img_left, img_right, HomoMat, blending_mode):
+        hl, wl = img_left.shape[:2]
+        hr, wr = img_right.shape[:2]
+
         stitch_width = wl + wr
         stitch_height = max(hl, hr)
         stitch_img = np.zeros((stitch_height, stitch_width, 3), dtype=np.uint8)
-
-        # 把左圖直接放進去
         stitch_img[:hl, :wl] = img_left
 
-        # Warp 右圖
         warped_right = cv2.warpPerspective(
             img_right,
             HomoMat,
-            (stitch_width, stitch_height),  # 輸出尺寸
-            flags=cv2.INTER_LINEAR  # 線性插值，可以改成 INTER_NEAREST 或 INTER_CUBIC
+            (stitch_width, stitch_height),
+            flags=cv2.INTER_LINEAR
         )
         blender = Blender()
         if blending_mode == "noBlending":
-            # 直接覆蓋右圖非零區域
             mask = (warped_right > 0)
             stitch_img[mask] = warped_right[mask]
         elif blending_mode == "linearBlending":
             stitch_img = blender.linearBlending([stitch_img, warped_right])
         elif blending_mode == "linearBlendingWithConstant":
             stitch_img = blender.linearBlendingWithConstantWidth([stitch_img, warped_right])
-        # remove the black border
         stitch_img = self.removeBlackBorder(stitch_img)
-
         return stitch_img
+
+    def _warp_center_view(self, img_left, img_right, HomoMat, blending_mode):
+        '''
+        Warp both images toward a midway, center view using the matrix square root of the homography.
+        Left image uses inv(sqrt(H)), right image uses sqrt(H).
+        '''
+        blender = Blender()
+
+        # Normalize Homography for numerical stability
+        H = HomoMat.astype(np.float64)
+        if abs(H[2, 2]) > 1e-12:
+            H = H / H[2, 2]
+
+        # Compute matrix square root of H (right->left)
+        M = self._matrix_square_root(H)
+        if M is None:
+            # Fallback to original behavior if sqrt fails
+            return self._warp_right_to_left(img_left, img_right, H, blending_mode)
+
+        # Left warp: inv(M), Right warp: M
+        try:
+            Minv = np.linalg.inv(M)
+        except np.linalg.LinAlgError:
+            return self._warp_right_to_left(img_left, img_right, H, blending_mode)
+
+        # Normalize
+        if abs(M[2, 2]) > 1e-12:
+            M = M / M[2, 2]
+        if abs(Minv[2, 2]) > 1e-12:
+            Minv = Minv / Minv[2, 2]
+
+        # Compute canvas bounds by transforming corners of both images
+        hl, wl = img_left.shape[:2]
+        hr, wr = img_right.shape[:2]
+        corners_left = np.array([[0, 0], [wl, 0], [wl, hl], [0, hl]], dtype=np.float64)
+        corners_right = np.array([[0, 0], [wr, 0], [wr, hr], [0, hr]], dtype=np.float64)
+
+        tl = self._transform_points(Minv, corners_left)
+        tr = self._transform_points(M, corners_right)
+
+        all_pts = np.vstack([tl, tr])
+        min_x = np.min(all_pts[:, 0])
+        min_y = np.min(all_pts[:, 1])
+        max_x = np.max(all_pts[:, 0])
+        max_y = np.max(all_pts[:, 1])
+
+        # Translation to keep coordinates positive
+        tx = -min_x
+        ty = -min_y
+        T = np.array([[1.0, 0.0, tx], [0.0, 1.0, ty], [0.0, 0.0, 1.0]], dtype=np.float64)
+
+        out_w = int(np.ceil(max_x - min_x))
+        out_h = int(np.ceil(max_y - min_y))
+        out_w = max(out_w, 1)
+        out_h = max(out_h, 1)
+
+        HL = T.dot(Minv)
+        HR = T.dot(M)
+
+        warped_left = cv2.warpPerspective(img_left, HL, (out_w, out_h), flags=cv2.INTER_LINEAR)
+        warped_right = cv2.warpPerspective(img_right, HR, (out_w, out_h), flags=cv2.INTER_LINEAR)
+
+        if blending_mode == "noBlending":
+            out = warped_right.copy()
+            mask_left = (warped_left > 0)
+            out[mask_left] = warped_left[mask_left]
+        elif blending_mode == "linearBlending":
+            out = blender.linearBlending([warped_left, warped_right])
+        elif blending_mode == "linearBlendingWithConstant":
+            out = blender.linearBlendingWithConstantWidth([warped_left, warped_right])
+        else:
+            out = blender.linearBlending([warped_left, warped_right])
+
+        out = self.removeBlackBorder(out)
+        return out
+
+    def _transform_points(self, H, pts):
+        '''
+        Transform 2D points (N x 2) by homography H and return in Cartesian coordinates.
+        '''
+        num = pts.shape[0]
+        pts_h = np.hstack([pts, np.ones((num, 1), dtype=np.float64)])
+        trans = (H.dot(pts_h.T)).T
+        # Avoid division by zero
+        w = trans[:, 2:3]
+        w = np.where(np.abs(w) < 1e-12, 1e-12, w)
+        cart = trans[:, :2] / w
+        return cart
+
+    def _matrix_square_root(self, A):
+        '''
+        Compute a matrix square root for a 3x3 homography matrix using eigen-decomposition.
+        Returns None on failure.
+        '''
+        try:
+            vals, vecs = np.linalg.eig(A)
+            # Handle potential complex values
+            sqrt_vals = np.sqrt(vals)
+            V = vecs
+            try:
+                Vinv = np.linalg.inv(V)
+            except np.linalg.LinAlgError:
+                return None
+            M = V.dot(np.diag(sqrt_vals)).dot(Vinv)
+            # If nearly real, take real part
+            if np.max(np.abs(M.imag)) < 1e-6:
+                M = M.real
+            else:
+                M = M.real  # take real component as an approximation
+            return M
+        except Exception:
+            return None
 
     def removeBlackBorder(self, img):
         '''

@@ -6,7 +6,7 @@ from Stitcher import Stitcher
 
 if __name__ == "__main__":
 
-    fileNameList = [('1', '2')]
+    fileNameList = [('3', '4')]
     for fname1, fname2 in fileNameList:
         # Read the img file
         src_path = "img/"
@@ -16,9 +16,10 @@ if __name__ == "__main__":
         img_right = cv2.imread(src_path + fileName2 + ".jpg")
 
         # The stitch object to stitch the image
-        blending_mode = "linearBlendingWithConstant"  # three mode - noBlending、linearBlending、linearBlendingWithConstant
+        blending_mode = "linearBlending"  # three mode - noBlending、linearBlending、linearBlendingWithConstant
         stitcher = Stitcher()
-        stitch_img = stitcher.stitch([img_left, img_right], blending_mode)
+        # view_mode can be "center" (both warp to center) or "right_to_left"
+        stitch_img = stitcher.stitch([img_left, img_right], blending_mode, view_mode="center")
 
         # plot the stitched image
         plt.figure(0)
