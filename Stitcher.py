@@ -207,18 +207,29 @@ class Stitcher:
         tr = self._transform_points(M, corners_right)
 
         all_pts = np.vstack([tl, tr])
-        min_x = np.min(all_pts[:, 0])
-        min_y = np.min(all_pts[:, 1])
-        max_x = np.max(all_pts[:, 0])
-        max_y = np.max(all_pts[:, 1])
+        # Validate transformed points to avoid NaN/Inf causing failures
+        if not np.all(np.isfinite(all_pts)):
+            return self._warp_right_to_left(img_left, img_right, HomoMat, blending_mode)
+
+        # Use nan-aware min/max just in case and compute dimensions
+        min_x = float(np.nanmin(all_pts[:, 0]))
+        min_y = float(np.nanmin(all_pts[:, 1]))
+        max_x = float(np.nanmax(all_pts[:, 0]))
+        max_y = float(np.nanmax(all_pts[:, 1]))
+
+        width = max_x - min_x
+        height = max_y - min_y
+        # Guard against degenerate or non-finite sizes
+        if (not np.isfinite(width)) or (not np.isfinite(height)) or (width <= 0) or (height <= 0):
+            return self._warp_right_to_left(img_left, img_right, HomoMat, blending_mode)
 
         # Translation to keep coordinates positive
         tx = -min_x
         ty = -min_y
         T = np.array([[1.0, 0.0, tx], [0.0, 1.0, ty], [0.0, 0.0, 1.0]], dtype=np.float64)
 
-        out_w = int(np.ceil(max_x - min_x))
-        out_h = int(np.ceil(max_y - min_y))
+        out_w = int(np.ceil(width))
+        out_h = int(np.ceil(height))
         out_w = max(out_w, 1)
         out_h = max(out_h, 1)
 
