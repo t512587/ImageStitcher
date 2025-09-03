@@ -16,7 +16,7 @@ if __name__ == "__main__":
         img_right = cv2.imread(src_path + fileName2 + ".jpg")
 
         # The stitch object to stitch the image
-        blending_mode = "linearBlending"  # three mode - noBlending、linearBlending、linearBlendingWithConstant
+        blending_mode = "noBlending"  # three mode - noBlending、linearBlending、linearBlendingWithConstant
         stitcher = Stitcher()
         stitch_img = stitcher.stitch([img_left, img_right], blending_mode)
 
