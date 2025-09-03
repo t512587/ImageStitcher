@@ -151,10 +151,15 @@ class Stitcher:
             (stitch_width, stitch_height),  # 輸出尺寸
             flags=cv2.INTER_LINEAR  # 線性插值，可以改成 INTER_NEAREST 或 INTER_CUBIC
         )
+        blender = Blender()
         if blending_mode == "noBlending":
             # 直接覆蓋右圖非零區域
             mask = (warped_right > 0)
             stitch_img[mask] = warped_right[mask]
+        elif blending_mode == "linearBlending":
+            stitch_img = blender.linearBlending([stitch_img, warped_right])
+        elif blending_mode == "linearBlendingWithConstant":
+            stitch_img = blender.linearBlendingWithConstantWidth([stitch_img, warped_right])
         # remove the black border
         stitch_img = self.removeBlackBorder(stitch_img)
 

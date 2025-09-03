@@ -11,58 +11,48 @@ class Blender:
         img_left, img_right = imgs
         (hl, wl) = img_left.shape[:2]
         (hr, wr) = img_right.shape[:2]
-        img_left_mask = np.zeros((hr, wr), dtype="int")
-        img_right_mask = np.zeros((hr, wr), dtype="int")
 
-        # find the left image and right image mask region(Those not zero pixels)
-        for i in range(hl):
-            for j in range(wl):
-                if np.count_nonzero(img_left[i, j]) > 0:
-                    img_left_mask[i, j] = 1
-        for i in range(hr):
-            for j in range(wr):
-                if np.count_nonzero(img_right[i, j]) > 0:
-                    img_right_mask[i, j] = 1
+        # Non-black masks
+        left_mask = np.any(img_left != 0, axis=2)
+        right_mask = np.any(img_right != 0, axis=2)
+        overlap = left_mask & right_mask
 
-        # find the overlap mask(overlap region of two image)
-        overlap_mask = np.zeros((hr, wr), dtype="int")
-        for i in range(hr):
-            for j in range(wr):
-                if (np.count_nonzero(img_left_mask[i, j]) > 0 and np.count_nonzero(img_right_mask[i, j]) > 0):
-                    overlap_mask[i, j] = 1
-
-        # Plot the overlap mask
+        # Plot the overlap mask (kept for parity with original behavior)
         plt.figure(21)
         plt.title("overlap_mask")
-        plt.imshow(overlap_mask.astype(int), cmap="gray")
+        plt.imshow(overlap.astype(int), cmap="gray")
 
-        # compute the alpha mask to linear blending the overlap region
-        alpha_mask = np.zeros((hr, wr))  # alpha value depend on left image
-        for i in range(hr):
-            minIdx = maxIdx = -1
-            for j in range(wr):
-                if (overlap_mask[i, j] == 1 and minIdx == -1):
-                    minIdx = j
-                if (overlap_mask[i, j] == 1):
-                    maxIdx = j
+        # If no overlap, simply composite
+        if not np.any(overlap):
+            out = img_right.copy()
+            out[left_mask] = img_left[left_mask]
+            return out
 
-            if (minIdx == maxIdx):  # represent this row's pixels are all zero, or only one pixel not zero
-                continue
+        # Compute first and last overlap columns per row
+        row_has_overlap = np.any(overlap, axis=1)
+        first = np.zeros(hr, dtype=int)
+        last = np.zeros(hr, dtype=int)
+        first[row_has_overlap] = np.argmax(overlap[row_has_overlap], axis=1)
+        last[row_has_overlap] = wr - 1 - np.argmax(overlap[row_has_overlap][:, ::-1], axis=1)
 
-            decrease_step = 1 / (maxIdx - minIdx)
-            for j in range(minIdx, maxIdx + 1):
-                alpha_mask[i, j] = 1 - (decrease_step * (j - minIdx))
+        length = np.maximum(1, (last - first))
+        j = np.arange(wr)[None, :]
+        first_col = first[:, None]
+        length_col = length[:, None]
 
-        linearBlending_img = np.copy(img_right)
-        linearBlending_img[:hl, :wl] = np.copy(img_left)
-        # linear blending
-        for i in range(hr):
-            for j in range(wr):
-                if (np.count_nonzero(overlap_mask[i, j]) > 0):
-                    linearBlending_img[i, j] = alpha_mask[i, j] * img_left[i, j] + (1 - alpha_mask[i, j]) * img_right[
-                        i, j]
+        alpha = np.zeros((hr, wr), dtype=np.float32)
+        inside = (j >= first_col) & (j <= (last[:, None])) & row_has_overlap[:, None]
+        ramp = 1.0 - (j - first_col) / length_col
+        alpha[inside] = ramp[inside]
 
-        return linearBlending_img
+        out = img_right.astype(np.float32).copy()
+        only_left = left_mask & ~right_mask
+        out[only_left] = img_left[only_left]
+
+        a = alpha[..., None]
+        out[overlap] = a[overlap] * img_left[overlap] + (1.0 - a[overlap]) * img_right[overlap]
+
+        return np.clip(out, 0, 255).astype(np.uint8)
 
     def linearBlendingWithConstantWidth(self, imgs):
         '''
@@ -72,65 +62,49 @@ class Blender:
         img_left, img_right = imgs
         (hl, wl) = img_left.shape[:2]
         (hr, wr) = img_right.shape[:2]
-        img_left_mask = np.zeros((hr, wr), dtype="int")
-        img_right_mask = np.zeros((hr, wr), dtype="int")
-        constant_width = 3  # constant width
+        constant_width = 3
 
-        # find the left image and right image mask region(Those not zero pixels)
-        for i in range(hl):
-            for j in range(wl):
-                if np.count_nonzero(img_left[i, j]) > 0:
-                    img_left_mask[i, j] = 1
-        for i in range(hr):
-            for j in range(wr):
-                if np.count_nonzero(img_right[i, j]) > 0:
-                    img_right_mask[i, j] = 1
+        # Non-black masks
+        left_mask = np.any(img_left != 0, axis=2)
+        right_mask = np.any(img_right != 0, axis=2)
+        overlap = left_mask & right_mask
 
-        # find the overlap mask(overlap region of two image)
-        overlap_mask = np.zeros((hr, wr), dtype="int")
-        for i in range(hr):
-            for j in range(wr):
-                if (np.count_nonzero(img_left_mask[i, j]) > 0 and np.count_nonzero(img_right_mask[i, j]) > 0):
-                    overlap_mask[i, j] = 1
+        if not np.any(overlap):
+            out = img_right.copy()
+            out[left_mask] = img_left[left_mask]
+            return out
 
-        # compute the alpha mask to linear blending the overlap region
-        alpha_mask = np.zeros((hr, wr))  # alpha value depend on left image
-        for i in range(hr):
-            minIdx = maxIdx = -1
-            for j in range(wr):
-                if (overlap_mask[i, j] == 1 and minIdx == -1):
-                    minIdx = j
-                if (overlap_mask[i, j] == 1):
-                    maxIdx = j
+        row_has_overlap = np.any(overlap, axis=1)
+        first = np.zeros(hr, dtype=int)
+        last = np.zeros(hr, dtype=int)
+        first[row_has_overlap] = np.argmax(overlap[row_has_overlap], axis=1)
+        last[row_has_overlap] = wr - 1 - np.argmax(overlap[row_has_overlap][:, ::-1], axis=1)
 
-            if (minIdx == maxIdx):  # represent this row's pixels are all zero, or only one pixel not zero
-                continue
+        mid = (first + last) // 2
+        j = np.arange(wr)[None, :]
+        mid_col = mid[:, None]
+        first_col = first[:, None]
+        last_col = last[:, None]
 
-            decrease_step = 1 / (maxIdx - minIdx)
+        alpha = np.zeros((hr, wr), dtype=np.float32)
+        # Regions fully left/right of the blending band
+        alpha = np.where(j <= (mid_col - constant_width), 1.0, alpha)
+        alpha = np.where(j >= (mid_col + constant_width), 0.0, alpha)
 
-            # Find the middle line of overlapping regions, and only do linear blending to those regions very close to the middle line.
-            middleIdx = int((maxIdx + minIdx) / 2)
+        # Linear ramp inside the band
+        band = (j > (mid_col - constant_width)) & (j < (mid_col + constant_width)) & row_has_overlap[:, None]
+        alpha_band = 1.0 - (j - (mid_col - constant_width)) / (2.0 * constant_width)
+        alpha = np.where(band, alpha_band, alpha)
 
-            # left
-            for j in range(minIdx, middleIdx + 1):
-                if (j >= middleIdx - constant_width):
-                    alpha_mask[i, j] = 1 - (decrease_step * (j - minIdx))
-                else:
-                    alpha_mask[i, j] = 1
-            # right
-            for j in range(middleIdx + 1, maxIdx + 1):
-                if (j <= middleIdx + constant_width):
-                    alpha_mask[i, j] = 1 - (decrease_step * (j - minIdx))
-                else:
-                    alpha_mask[i, j] = 0
+        # Zero out columns outside the overlap bounds
+        valid = (j >= first_col) & (j <= last_col) & row_has_overlap[:, None]
+        alpha = np.where(valid, alpha, 0.0)
 
-        linearBlendingWithConstantWidth_img = np.copy(img_right)
-        linearBlendingWithConstantWidth_img[:hl, :wl] = np.copy(img_left)
-        # linear blending with constant width
-        for i in range(hr):
-            for j in range(wr):
-                if (np.count_nonzero(overlap_mask[i, j]) > 0):
-                    linearBlendingWithConstantWidth_img[i, j] = alpha_mask[i, j] * img_left[i, j] + (
-                                1 - alpha_mask[i, j]) * img_right[i, j]
+        out = img_right.astype(np.float32).copy()
+        only_left = left_mask & ~right_mask
+        out[only_left] = img_left[only_left]
 
-        return linearBlendingWithConstantWidth_img
+        a = alpha[..., None]
+        out[overlap] = a[overlap] * img_left[overlap] + (1.0 - a[overlap]) * img_right[overlap]
+
+        return np.clip(out, 0, 255).astype(np.uint8)
