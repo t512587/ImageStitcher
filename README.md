@@ -22,7 +22,7 @@ This repository is a streamlined and optimized fork tailored for shelf imaging w
 ## Requirements
 - Python 3.9–3.13 (tested with 3.13)
 - Packages:
-  - `opencv-contrib-python>=4.5` (SIFT lives in contrib)
+  - `opencv-python>=4.5` (if not, try `opencv-contrib-python`)
   - `numpy`
   - `matplotlib`
 
@@ -128,3 +128,4 @@ cv2.imwrite("shelf_stitched.jpg", stitched)
 
 ## Notes
 - This fork is adapted for the dual top‑down shelf camera scenario with similar camera poses. If you work with very different viewpoints or focal lengths, additional calibration or exposure compensation may be required.
+- Sourced from [Automatic Panoramic Image Stitching by Yunyung](https://github.com/Yunyung/Automatic-Panoramic-Image-Stitching)
